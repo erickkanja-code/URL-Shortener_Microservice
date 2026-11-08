@@ -1,4 +1,5 @@
-from fastapi import Body, APIRouter, Query, Depends, HTTPException
+from fastapi import Body, APIRouter, Depends, HTTPException, Query
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, HttpUrl
 from typing import Annotated, Any
 import random
@@ -11,7 +12,7 @@ class URL(BaseModel):
 def shorten_url(long_url: str) -> str:
     domain_begins_at: int = long_url.rfind(".")
     domain_name: str = long_url[domain_begins_at:]
-    if long_url.startswith("https://") or long_url.startswith("https://"):
+    if long_url.startswith("https://") or long_url.startswith("http://"):
         if long_url.startswith("https://www."):
             website_name_begins_at: int = long_url.find(".")+1
         else:
@@ -28,13 +29,16 @@ async def create_short_url(url: Annotated[URL, Body()], redis_client: Any = Depe
     if short_url:
         raise HTTPException(status_code=409, detail="This URL has already been shortened")
     short_url = shorten_url(str(url.url))
-    redis_client.set(str(url.url), short_url) 
-    redis_client.set(short_url, str(url.url)) 
+    await redis_client.set(str(url.url), short_url) 
+    await redis_client.set(short_url, str(url.url)) 
     return {"url": short_url} 
     
-@router.get('/url/') 
-async def read_short_url(url: Annotated[URL, Query()]):
-    short_url = shorten_url(str(url.url)) 
-    return {"url": short_url}
+@router.get('/') 
+async def read_short_url(short_url: str = Query(), redis_client: Any = Depends(connect_redis)):
+    long_url: str = await redis_client.get(short_url)
+    if long_url:
+        return RedirectResponse(url=long_url)
+    else:
+        raise HTTPException(status_code=404, detail="URL not found")
 
 

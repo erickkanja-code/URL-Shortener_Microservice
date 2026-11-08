@@ -6,6 +6,3 @@ app.include_router(router) # type: ignore
 
 
 
-@app.get("/")
-def main():
-    return {"message": "Hello World"}
