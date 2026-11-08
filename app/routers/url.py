@@ -1,14 +1,28 @@
 from fastapi import Body, APIRouter
 from pydantic import BaseModel, HttpUrl
 from typing import Annotated
-router = APIRouter() # type: ignore
+import random
+router = APIRouter()
 
 class URL(BaseModel):
     url: HttpUrl
 
+def shorten_url(long_url: str) -> str:
+    domain_begins_at: int = long_url.rfind(".")
+    domain_name: str = long_url[domain_begins_at:]
+    if long_url.startswith("https://") or long_url.startswith("https://"):
+        if long_url.startswith("https://www."):
+            website_name_begins_at: int = long_url.find(".")+1
+        else:
+            website_name_begins_at: int = long_url.find("/")+2
+    else:
+        website_name_begins_at: int = 0
+    short_url: str = long_url[website_name_begins_at: website_name_begins_at+2] + long_url[domain_begins_at-2:domain_begins_at] + str(random.randint(1,9)) + str(random.randint(1,9)) + domain_name
+    return short_url 
 
 
-@router.post('/url/') # type: ignore
+@router.post('/url/') 
 async def create_short_url(url: Annotated[URL, Body()]):
-    return {"url": url}
+    short_url = shorten_url(str(url.url)) 
+    return {"url": short_url} 
     
