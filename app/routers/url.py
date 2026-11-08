@@ -1,7 +1,8 @@
-from fastapi import Body, APIRouter, Query
+from fastapi import Body, APIRouter, Query, Depends, HTTPException
 from pydantic import BaseModel, HttpUrl
-from typing import Annotated
+from typing import Annotated, Any
 import random
+from ..dependency import connect_redis
 router = APIRouter()
 
 class URL(BaseModel):
@@ -21,9 +22,14 @@ def shorten_url(long_url: str) -> str:
     return short_url 
 
 
-@router.post('/url/') 
-async def create_short_url(url: Annotated[URL, Body()]):
-    short_url = shorten_url(str(url.url)) 
+@router.post('/') 
+async def create_short_url(url: Annotated[URL, Body()], redis_client: Any = Depends(connect_redis)):
+    short_url = await redis_client.get(str(url.url))
+    if short_url:
+        raise HTTPException(status_code=409, detail="This URL has already been shortened")
+    short_url = shorten_url(str(url.url))
+    redis_client.set(str(url.url), short_url) 
+    redis_client.set(short_url, str(url.url)) 
     return {"url": short_url} 
     
 @router.get('/url/') 
