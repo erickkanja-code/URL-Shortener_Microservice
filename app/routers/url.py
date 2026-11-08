@@ -30,3 +30,5 @@ async def create_short_url(url: Annotated[URL, Body()]):
 async def read_short_url(url: Annotated[URL, Query()]):
     short_url = shorten_url(str(url.url)) 
     return {"url": short_url}
+
+
