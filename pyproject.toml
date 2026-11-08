@@ -4,4 +4,10 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi[standard]>=0.162.2",
+    "redis>=8.1.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
 ]
