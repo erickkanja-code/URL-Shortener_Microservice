@@ -23,7 +23,7 @@ def shorten_url(long_url: str) -> str:
     return short_url 
 
 
-@router.post('/') 
+@router.post('/', status_code=201) 
 async def create_short_url(url: Annotated[URL, Body()], redis_client: Any = Depends(connect_redis)):
     short_url = await redis_client.get(str(url.url))
     if short_url:
@@ -37,7 +37,7 @@ async def create_short_url(url: Annotated[URL, Body()], redis_client: Any = Depe
 async def read_short_url(short_url: str = Query(), redis_client: Any = Depends(connect_redis)):
     long_url: str = await redis_client.get(short_url)
     if long_url:
-        return RedirectResponse(url=long_url)
+        return RedirectResponse(url=long_url, status_code=302)
     else:
         raise HTTPException(status_code=404, detail="URL not found")
 
