@@ -1,7 +1,7 @@
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Date, Select, cast, func, or_, select
 from sqlalchemy.orm import joinedload, selectinload
 
-from .models import URL
+from .models import URL, Click
 
 
 class URLManager:
@@ -26,3 +26,26 @@ class URLManager:
         # joinedload  -> owner is fetched in the same query with a JOIN (like select_related).
         # selectinload -> tags are fetched in one extra query using IN (like prefetch_related).
         return query.options(joinedload(URL.owner), selectinload(URL.tags))
+
+
+class ClickManager:
+    @staticmethod
+    def clicks_per_country(url_id: int) -> Select:
+        total_clicks = func.count(Click.id).label("total_clicks")
+        return (
+            select(Click.country, total_clicks)
+            .where(Click.url_id == url_id)
+            .group_by(Click.country)
+            .order_by(total_clicks.desc())
+        )
+
+    @staticmethod
+    def clicks_per_day(url_id: int) -> Select:
+        day = cast(Click.clicked_at, Date).label("day")
+        total_clicks = func.count(Click.id).label("total_clicks")
+        return (
+            select(day, total_clicks)
+            .where(Click.url_id == url_id)
+            .group_by(day)
+            .order_by(day)
+        )
