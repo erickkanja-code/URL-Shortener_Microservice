@@ -1,55 +1,66 @@
-from fastapi import Body, APIRouter, Depends, HTTPException, Query
+import secrets
+import string
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, HttpUrl
-from typing import Annotated, Any
-import random
-from ..dependency import connect_redis
-from sqlalchemy import create_engine
+from sqlalchemy import select
 from sqlalchemy.orm import Session
-import os
-from dotenv import load_dotenv
-load_dotenv()
-db_url = os.environ["DATABASE_URL"]
-engine = create_engine(db_url)
+
+from ..db import get_db
+from ..models import URL, User
+
 router = APIRouter()
 
-def get_session(engine): # type: ignore
-    with Session(engine) as session: # type: ignore
-        yield session
+ALPHABET = string.ascii_letters + string.digits
+SHORT_CODE_LENGTH = 7
 
-class URL(BaseModel):
+
+class URLCreate(BaseModel):
     url: HttpUrl
-
-def shorten_url(long_url: str) -> str:
-    domain_begins_at: int = long_url.rfind(".")
-    domain_name: str = long_url[domain_begins_at:]
-    if long_url.startswith("https://") or long_url.startswith("http://"):
-        if long_url.startswith("https://www."):
-            website_name_begins_at: int = long_url.find(".")+1
-        else:
-            website_name_begins_at: int = long_url.find("/")+2
-    else:
-        website_name_begins_at: int = 0
-    short_url: str = long_url[website_name_begins_at: website_name_begins_at+2] + long_url[domain_begins_at-2:domain_begins_at] + str(random.randint(1,9)) + str(random.randint(1,9)) + domain_name[:4]
-    return short_url 
+    owner_id: int
 
 
-@router.post('/', status_code=201) 
-async def create_short_url(url: Annotated[URL, Body()], redis_client: Any = Depends(connect_redis)):
-    short_url = await redis_client.get(str(url.url))
-    if short_url:
+def generate_short_code(db: Session) -> str:
+    while True:
+        short_code = "".join(secrets.choice(ALPHABET) for _ in range(SHORT_CODE_LENGTH))
+        existing_url = db.scalar(select(URL).where(URL.short_code == short_code))
+        if existing_url is None:
+            return short_code
+
+
+@router.post("/", status_code=201)
+def create_short_url(payload: URLCreate, db: Annotated[Session, Depends(get_db)]):
+    if db.get(User, payload.owner_id) is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    original_url = str(payload.url)
+    existing_url = db.scalar(
+        select(URL).where(
+            URL.original_url == original_url,
+            URL.owner_id == payload.owner_id,
+        )
+    )
+    if existing_url:
         raise HTTPException(status_code=409, detail="This URL has already been shortened")
-    short_url = shorten_url(str(url.url))
-    await redis_client.set(str(url.url), short_url) 
-    await redis_client.set(short_url, str(url.url)) 
-    return {"url": short_url} 
-    
-@router.get('/') 
-async def read_short_url(short_url: str = Query(), redis_client: Any = Depends(connect_redis)):
-    long_url: str = await redis_client.get(short_url)
-    if long_url:
-        return RedirectResponse(url=long_url, status_code=302)
-    else:
+
+    short_code = generate_short_code(db)
+    new_url = URL(
+        original_url=original_url,
+        short_code=short_code,
+        owner_id=payload.owner_id,
+    )
+    db.add(new_url)
+    db.commit()
+    return {"url": short_code}
+
+
+@router.get("/")
+def read_short_url(
+    short_url: Annotated[str, Query()], db: Annotated[Session, Depends(get_db)]
+):
+    url = db.scalar(select(URL).where(URL.short_code == short_url))
+    if url is None:
         raise HTTPException(status_code=404, detail="URL not found")
-
-
+    return RedirectResponse(url=url.original_url, status_code=302)
