@@ -4,7 +4,18 @@ from pydantic import BaseModel, HttpUrl
 from typing import Annotated, Any
 import random
 from ..dependency import connect_redis
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+import os
+from dotenv import load_dotenv
+load_dotenv()
+db_url = os.environ["DATABASE_URL"]
+engine = create_engine(db_url)
 router = APIRouter()
+
+def get_session(engine): # type: ignore
+    with Session(engine) as session: # type: ignore
+        yield session
 
 class URL(BaseModel):
     url: HttpUrl
