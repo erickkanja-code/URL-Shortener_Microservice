@@ -1,0 +1,1 @@
+"""Infrastructure shared by the whole app: settings, database and cache connections."""

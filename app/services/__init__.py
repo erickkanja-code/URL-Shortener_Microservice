@@ -1,0 +1,1 @@
+"""Business logic: the rules of the app, independent of HTTP details."""

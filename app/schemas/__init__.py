@@ -1,0 +1,1 @@
+"""Pydantic schemas: the API contract for request bodies and responses."""
