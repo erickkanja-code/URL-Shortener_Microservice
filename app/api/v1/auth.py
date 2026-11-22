@@ -1,8 +1,10 @@
 """Authentication endpoints, under /api/v1/auth."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from app.api.deps import SessionDep
+from app.core.config import LOGIN_RATE_LIMIT
+from app.core.rate_limit import limiter
 from app.schemas.auth import AccessToken, LoginRequest, RefreshRequest, TokenPair
 from app.schemas.user import UserCreate, UserResponse
 from app.services import auth as auth_service
@@ -17,8 +19,13 @@ def register(payload: UserCreate, db: SessionDep):
 
 
 @router.post("/login/", response_model=TokenPair)
-def login(payload: LoginRequest, db: SessionDep):
-    """Log in with email and password, and receive an access and a refresh token."""
+@limiter.limit(LOGIN_RATE_LIMIT)
+def login(request: Request, payload: LoginRequest, db: SessionDep):
+    """Log in with email and password, and receive an access and a refresh token.
+
+    Limited to 5 attempts per minute per IP address, to slow down password
+    guessing. Further attempts get 429 Too Many Requests.
+    """
     return auth_service.login(db, payload)
 
 

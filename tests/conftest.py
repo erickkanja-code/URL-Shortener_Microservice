@@ -7,7 +7,7 @@ from the development one: every table in it is emptied after each test.
 
 Lifecycle:
 - once per test run: drop and recreate all tables from the models
-- before each test: seed the default tags
+- before each test: seed the default tags and reset the rate limiter
 - after each test: empty every table, so tests never affect each other
 """
 
@@ -20,6 +20,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.core.security import hash_password
 from app.main import app
 from app.models import Base, Tag, Tier, User
@@ -61,6 +62,16 @@ def db_session(engine):
         connection.execute(
             text("TRUNCATE users, urls, clicks, tags, url_tags RESTART IDENTITY CASCADE")
         )
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    """Clear the rate limiter's counters before every test.
+
+    The counters live in memory and would otherwise carry over between
+    tests, so login attempts in one test could get another test rate-limited.
+    """
+    limiter.reset()
 
 
 @pytest.fixture

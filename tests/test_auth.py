@@ -155,3 +155,40 @@ def test_refresh_rejects_a_token_for_a_deleted_user(client, db_session, user):
     response = client.post(REFRESH_ENDPOINT, json={"refresh_token": tokens["refresh_token"]})
 
     assert response.status_code == 401
+
+
+# ---------- Rate limiting ----------
+
+def test_login_allows_five_attempts_per_minute(client, user):
+    for _ in range(5):
+        response = client.post(LOGIN_ENDPOINT, json={"email": user.email, "password": "wrong-password"})
+        assert response.status_code == 401
+
+
+def test_login_blocks_the_sixth_attempt_in_a_minute(client, user):
+    for _ in range(5):
+        client.post(LOGIN_ENDPOINT, json={"email": user.email, "password": "wrong-password"})
+
+    response = client.post(LOGIN_ENDPOINT, json={"email": user.email, "password": TEST_PASSWORD})
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "60"
+    assert response.json()["detail"] == "Too many attempts. Please try again in a minute."
+
+
+def test_successful_logins_also_count_toward_the_limit(client, user):
+    for _ in range(5):
+        login(client, user.email)
+
+    response = client.post(LOGIN_ENDPOINT, json={"email": user.email, "password": TEST_PASSWORD})
+
+    assert response.status_code == 429
+
+
+def test_other_endpoints_are_not_rate_limited(client, user):
+    for _ in range(5):
+        client.post(LOGIN_ENDPOINT, json={"email": user.email, "password": "wrong-password"})
+
+    response = client.post(REGISTER_ENDPOINT, json={"email": "new@example.com", "password": TEST_PASSWORD})
+
+    assert response.status_code == 201
