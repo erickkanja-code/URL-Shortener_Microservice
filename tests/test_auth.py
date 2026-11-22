@@ -1,10 +1,24 @@
 """Tests for the authentication endpoints under /api/v1/auth."""
 
+from datetime import timedelta
+
 from sqlalchemy import select
 
-from app.core.security import verify_password
+from app.core.security import (
+    ACCESS_TOKEN_TYPE,
+    REFRESH_TOKEN_TYPE,
+    create_token,
+    decode_token,
+    verify_password,
+)
 from app.models import User
-from tests.helpers import REGISTER_ENDPOINT, TEST_PASSWORD
+from tests.helpers import (
+    LOGIN_ENDPOINT,
+    REFRESH_ENDPOINT,
+    REGISTER_ENDPOINT,
+    TEST_PASSWORD,
+    login,
+)
 
 
 # ---------- Register ----------
@@ -63,3 +77,81 @@ def test_register_rejects_a_short_password(client):
     )
 
     assert response.status_code == 422
+
+
+# ---------- Login ----------
+
+def test_login_returns_an_access_and_a_refresh_token(client, user):
+    body = login(client, user.email)
+
+    assert body["token_type"] == "bearer"
+    assert decode_token(body["access_token"], ACCESS_TOKEN_TYPE) == user.id
+    assert decode_token(body["refresh_token"], REFRESH_TOKEN_TYPE) == user.id
+
+
+def test_login_ignores_email_case(client, user):
+    body = login(client, user.email.upper())
+
+    assert decode_token(body["access_token"], ACCESS_TOKEN_TYPE) == user.id
+
+
+def test_login_rejects_a_wrong_password(client, user):
+    response = client.post(LOGIN_ENDPOINT, json={"email": user.email, "password": "wrong-password"})
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Incorrect email or password"
+
+
+def test_login_gives_the_same_error_for_an_unknown_email(client):
+    response = client.post(
+        LOGIN_ENDPOINT, json={"email": "nobody@example.com", "password": TEST_PASSWORD}
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Incorrect email or password"
+
+
+# ---------- Refresh ----------
+
+def test_refresh_returns_a_new_access_token(client, user):
+    tokens = login(client, user.email)
+
+    response = client.post(REFRESH_ENDPOINT, json={"refresh_token": tokens["refresh_token"]})
+
+    assert response.status_code == 200
+    assert decode_token(response.json()["access_token"], ACCESS_TOKEN_TYPE) == user.id
+
+
+def test_refresh_rejects_an_access_token(client, user):
+    tokens = login(client, user.email)
+
+    response = client.post(REFRESH_ENDPOINT, json={"refresh_token": tokens["access_token"]})
+
+    assert response.status_code == 401
+
+
+def test_refresh_rejects_an_expired_token(client, user):
+    expired = create_token(user.id, REFRESH_TOKEN_TYPE, expires_in=timedelta(seconds=-1))
+
+    response = client.post(REFRESH_ENDPOINT, json={"refresh_token": expired})
+
+    assert response.status_code == 401
+
+
+def test_refresh_rejects_a_tampered_token(client, user):
+    token = login(client, user.email)["refresh_token"]
+    tampered = token[:-4] + ("aaaa" if not token.endswith("aaaa") else "bbbb")
+
+    response = client.post(REFRESH_ENDPOINT, json={"refresh_token": tampered})
+
+    assert response.status_code == 401
+
+
+def test_refresh_rejects_a_token_for_a_deleted_user(client, db_session, user):
+    tokens = login(client, user.email)
+    db_session.delete(user)
+    db_session.commit()
+
+    response = client.post(REFRESH_ENDPOINT, json={"refresh_token": tokens["refresh_token"]})
+
+    assert response.status_code == 401
