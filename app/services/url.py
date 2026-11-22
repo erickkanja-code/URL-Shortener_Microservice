@@ -113,17 +113,25 @@ def create_url(db: Session, payload: URLCreate, owner: User) -> URL:
     return new_url
 
 
-def list_urls(db: Session, owner: User, page: int, size: int) -> tuple[list[URL], int]:
+def list_urls(
+    db: Session, owner: User, page: int, size: int, tag: str | None = None
+) -> tuple[list[URL], int]:
     """Return one page of the owner's URLs, newest first, and their total count.
 
-    Pages are numbered from 1. URLs created at the same moment are ordered
-    by id, so pages never overlap or skip rows.
+    If `tag` is given, only URLs with a tag of that name are included, ignoring
+    case. The total counts the same filtered URLs. Pages are numbered from 1.
+    URLs created at the same moment are ordered by id, so pages never overlap
+    or skip rows.
     """
-    total = db.scalar(select(func.count()).select_from(URL).where(URL.owner_id == owner.id))
+    filters = [URL.owner_id == owner.id]
+    if tag:
+        filters.append(URL.tags.any(func.lower(Tag.name) == tag.lower()))
+
+    total = db.scalar(select(func.count()).select_from(URL).where(*filters))
 
     query = URLManager.with_owner_and_tags(
         select(URL)
-        .where(URL.owner_id == owner.id)
+        .where(*filters)
         .order_by(URL.created_at.desc(), URL.id.desc())
         .offset((page - 1) * size)
         .limit(size)

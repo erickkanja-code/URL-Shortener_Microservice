@@ -28,9 +28,13 @@ def list_urls(
     current_user: CurrentUserDep,
     page: Annotated[int, Query(ge=1)] = 1,
     size: Annotated[int, Query(ge=1, le=100)] = 10,
+    tag: Annotated[str | None, Query(max_length=50)] = None,
 ):
-    """List one page of the logged-in user's URLs, newest first."""
-    urls, total = url_service.list_urls(db, current_user, page, size)
+    """List one page of the logged-in user's URLs, newest first.
+
+    Pass `tag` to only list URLs with that tag (case-insensitive).
+    """
+    urls, total = url_service.list_urls(db, current_user, page, size, tag)
     return {"items": urls, "total": total, "page": page, "size": size}
 
 

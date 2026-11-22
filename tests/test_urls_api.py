@@ -254,3 +254,67 @@ def test_other_users_cannot_delete_a_url(client, user_headers, other_user_header
     assert response.status_code == 403
     body = client.get(url_detail(created["short_code"]), headers=user_headers).json()
     assert body["is_active"] is True
+
+
+# ---------- Tag search ----------
+
+def test_list_urls_filters_by_tag(client, user_headers):
+    create_url(client, user_headers, "https://a.com", tags=["Marketing"])
+    create_url(client, user_headers, "https://b.com", tags=["Work"])
+    create_url(client, user_headers, "https://c.com", tags=["Marketing", "Work"])
+
+    body = client.get(URLS_ENDPOINT, params={"tag": "Marketing"}, headers=user_headers).json()
+
+    assert body["total"] == 2
+    assert sorted(item["original_url"] for item in body["items"]) == [
+        "https://a.com/",
+        "https://c.com/",
+    ]
+
+
+def test_tag_search_ignores_case(client, user_headers):
+    create_url(client, user_headers, tags=["Marketing"])
+
+    body = client.get(URLS_ENDPOINT, params={"tag": "marKETing"}, headers=user_headers).json()
+
+    assert body["total"] == 1
+
+
+def test_tag_search_returns_each_url_once(client, user_headers):
+    create_url(client, user_headers, tags=["Marketing", "Work", "News"])
+
+    body = client.get(URLS_ENDPOINT, params={"tag": "Work"}, headers=user_headers).json()
+
+    assert body["total"] == 1
+    assert len(body["items"]) == 1
+
+
+def test_tag_search_with_an_unknown_tag_returns_nothing(client, user_headers):
+    create_url(client, user_headers, tags=["Marketing"])
+
+    body = client.get(URLS_ENDPOINT, params={"tag": "Nope"}, headers=user_headers).json()
+
+    assert body["total"] == 0
+    assert body["items"] == []
+
+
+def test_tag_search_only_includes_the_users_urls(client, user_headers, other_user_headers):
+    create_url(client, user_headers, "https://mine.com", tags=["Marketing"])
+    create_url(client, other_user_headers, "https://theirs.com", tags=["Marketing"])
+
+    body = client.get(URLS_ENDPOINT, params={"tag": "Marketing"}, headers=user_headers).json()
+
+    assert [item["original_url"] for item in body["items"]] == ["https://mine.com/"]
+
+
+def test_tag_search_works_with_pagination(client, user_headers):
+    for number in range(3):
+        create_url(client, user_headers, f"https://tagged.com/{number}", tags=["Work"])
+    create_url(client, user_headers, "https://untagged.com")
+
+    body = client.get(
+        URLS_ENDPOINT, params={"tag": "Work", "page": 2, "size": 2}, headers=user_headers
+    ).json()
+
+    assert body["total"] == 3
+    assert [item["original_url"] for item in body["items"]] == ["https://tagged.com/0"]
