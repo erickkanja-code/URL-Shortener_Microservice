@@ -3,7 +3,10 @@
 These functions hold the rules of the app (duplicates are rejected, an
 alias becomes the short code, deleting means deactivating, and so on).
 They know nothing about URL paths or request objects; the API layer calls
-them with plain values.
+them with plain values and the logged-in user.
+
+Permissions follow the IsOwnerOrReadOnly rule: any logged-in user may read
+a URL's details, but only its owner may change or deactivate it.
 
 They raise `HTTPException` directly. This is a deliberate simplification:
 a stricter design would raise custom exceptions and let the API layer turn
@@ -48,34 +51,35 @@ def get_tags(db: Session, names: list[str]) -> list[Tag]:
     return list(tags)
 
 
-def get_owned_url(db: Session, short_code: str, owner_id: int) -> URL:
-    """Return the URL with this short code if it belongs to this owner.
+def get_url(db: Session, short_code: str) -> URL:
+    """Return the URL with this short code, with its owner and tags loaded.
 
-    The owner and tags are loaded eagerly. Raises 404 if the URL does not
-    exist or belongs to someone else, so other users cannot tell it exists.
+    Any logged-in user may read any URL (the "ReadOnly" part of
+    IsOwnerOrReadOnly). Raises 404 if the short code does not exist.
     """
-    query = URLManager.with_owner_and_tags(
-        select(URL).where(URL.short_code == short_code, URL.owner_id == owner_id)
-    )
+    query = URLManager.with_owner_and_tags(select(URL).where(URL.short_code == short_code))
     url = db.scalar(query)
     if url is None:
         raise HTTPException(status_code=404, detail="URL not found")
     return url
 
 
-def create_url(db: Session, payload: URLCreate) -> URL:
-    """Create and save a short URL.
+def ensure_owner(url: URL, user: User) -> None:
+    """Raise 403 unless the user owns the URL (the "IsOwner" part of IsOwnerOrReadOnly)."""
+    if url.owner_id != user.id:
+        raise HTTPException(status_code=403, detail="You can only change URLs you own")
 
-    Raises 404 if the owner does not exist, 409 if this owner already
-    shortened this URL or the alias is taken, and 400 for unknown tags.
-    A custom alias, when given, becomes the short code.
+
+def create_url(db: Session, payload: URLCreate, owner: User) -> URL:
+    """Create and save a short URL owned by the given user.
+
+    Raises 409 if this owner already shortened this URL or the alias is
+    taken, and 400 for unknown tags. A custom alias, when given, becomes
+    the short code.
     """
-    if db.get(User, payload.owner_id) is None:
-        raise HTTPException(status_code=404, detail="User not found")
-
     original_url = str(payload.original_url)
     duplicate = db.scalar(
-        select(URL).where(URL.original_url == original_url, URL.owner_id == payload.owner_id)
+        select(URL).where(URL.original_url == original_url, URL.owner_id == owner.id)
     )
     if duplicate:
         raise HTTPException(status_code=409, detail="This URL has already been shortened")
@@ -92,7 +96,7 @@ def create_url(db: Session, payload: URLCreate) -> URL:
         original_url=original_url,
         short_code=short_code,
         custom_alias=payload.custom_alias,
-        owner_id=payload.owner_id,
+        owner_id=owner.id,
         title=payload.title,
         description=payload.description,
         expires_at=payload.expires_at,
@@ -103,17 +107,17 @@ def create_url(db: Session, payload: URLCreate) -> URL:
     return new_url
 
 
-def list_urls(db: Session, owner_id: int, page: int, size: int) -> tuple[list[URL], int]:
-    """Return one page of an owner's URLs, newest first, and their total count.
+def list_urls(db: Session, owner: User, page: int, size: int) -> tuple[list[URL], int]:
+    """Return one page of the owner's URLs, newest first, and their total count.
 
     Pages are numbered from 1. URLs created at the same moment are ordered
     by id, so pages never overlap or skip rows.
     """
-    total = db.scalar(select(func.count()).select_from(URL).where(URL.owner_id == owner_id))
+    total = db.scalar(select(func.count()).select_from(URL).where(URL.owner_id == owner.id))
 
     query = URLManager.with_owner_and_tags(
         select(URL)
-        .where(URL.owner_id == owner_id)
+        .where(URL.owner_id == owner.id)
         .order_by(URL.created_at.desc(), URL.id.desc())
         .offset((page - 1) * size)
         .limit(size)
@@ -123,15 +127,17 @@ def list_urls(db: Session, owner_id: int, page: int, size: int) -> tuple[list[UR
     return urls, total
 
 
-def update_url(db: Session, short_code: str, payload: URLUpdate) -> URL:
+def update_url(db: Session, short_code: str, payload: URLUpdate, user: User) -> URL:
     """Update only the fields the client sent, and return the updated URL.
 
-    Raises 404 if the URL is not found for this owner, and 400 for unknown
-    tags. Sending `tags` replaces the URL's tags.
+    Raises 404 if the short code does not exist, 403 if the user does not
+    own the URL, and 400 for unknown tags. Sending `tags` replaces the
+    URL's tags.
     """
-    url = get_owned_url(db, short_code, payload.owner_id)
+    url = get_url(db, short_code)
+    ensure_owner(url, user)
 
-    changes = payload.model_dump(exclude_unset=True, exclude={"owner_id", "tags"})
+    changes = payload.model_dump(exclude_unset=True, exclude={"tags"})
     for field, value in changes.items():
         setattr(url, field, value)
     if "original_url" in changes:
@@ -144,12 +150,14 @@ def update_url(db: Session, short_code: str, payload: URLUpdate) -> URL:
     return url
 
 
-def deactivate_url(db: Session, short_code: str, owner_id: int) -> None:
+def deactivate_url(db: Session, short_code: str, user: User) -> None:
     """Deactivate a URL instead of deleting it, keeping its click history.
 
-    Raises 404 if the URL is not found for this owner.
+    Raises 404 if the short code does not exist, and 403 if the user does
+    not own the URL.
     """
-    url = get_owned_url(db, short_code, owner_id)
+    url = get_url(db, short_code)
+    ensure_owner(url, user)
     url.is_active = False
     db.commit()
 

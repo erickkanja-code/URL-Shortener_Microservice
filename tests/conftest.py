@@ -23,7 +23,7 @@ from app.core.database import get_db
 from app.core.security import hash_password
 from app.main import app
 from app.models import Base, Tag, Tier, User
-from tests.helpers import TEST_PASSWORD
+from tests.helpers import TEST_PASSWORD, auth_headers
 
 load_dotenv()
 
@@ -90,7 +90,7 @@ def user(db_session) -> User:
 
 @pytest.fixture
 def other_user(db_session) -> User:
-    """A second user, for checking that users cannot see each other's URLs."""
+    """A second user, for checking that users cannot change each other's URLs."""
     user = User(
         email="premium@example.com",
         hashed_password=hash_password(TEST_PASSWORD),
@@ -100,6 +100,18 @@ def other_user(db_session) -> User:
     db_session.add(user)
     db_session.commit()
     return user
+
+
+@pytest.fixture
+def user_headers(user) -> dict:
+    """Request headers that authenticate as `user`."""
+    return auth_headers(user)
+
+
+@pytest.fixture
+def other_user_headers(other_user) -> dict:
+    """Request headers that authenticate as `other_user`."""
+    return auth_headers(other_user)
 
 
 @pytest.fixture

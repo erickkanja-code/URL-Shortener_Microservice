@@ -9,10 +9,12 @@ from app.schemas.user import OwnerResponse
 
 
 class URLCreate(BaseModel):
-    """Request body for creating a short URL."""
+    """Request body for creating a short URL.
+
+    The owner is always the logged-in user, taken from the access token.
+    """
 
     original_url: HttpUrl
-    owner_id: int
     custom_alias: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{3,10}$")
     title: str | None = Field(default=None, max_length=255)
     description: str | None = Field(default=None, max_length=500)
@@ -23,11 +25,9 @@ class URLCreate(BaseModel):
 class URLUpdate(BaseModel):
     """Request body for updating a URL.
 
-    `owner_id` identifies who is making the request. Every other field is
-    optional, and only the fields actually sent are changed.
+    Every field is optional, and only the fields actually sent are changed.
     """
 
-    owner_id: int
     original_url: HttpUrl | None = None
     title: str | None = Field(default=None, max_length=255)
     description: str | None = Field(default=None, max_length=500)
