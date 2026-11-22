@@ -22,12 +22,16 @@ class Tier(StrEnum):
 
 
 class User(Base):
-    """A user who owns short URLs."""
+    """A user who owns short URLs.
+
+    Only a hash of the password is stored, never the password itself.
+    """
 
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True)
+    hashed_password: Mapped[str] = mapped_column(String(255))
     is_premium: Mapped[bool] = mapped_column(default=False)
     tier: Mapped[Tier] = mapped_column(
         SQLAlchemyEnum(

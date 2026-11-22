@@ -20,8 +20,10 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.security import hash_password
 from app.main import app
 from app.models import Base, Tag, Tier, User
+from tests.helpers import TEST_PASSWORD
 
 load_dotenv()
 
@@ -80,7 +82,7 @@ def client(db_session):
 @pytest.fixture
 def user(db_session) -> User:
     """A free-tier user who owns URLs in the tests."""
-    user = User(email="free@example.com")
+    user = User(email="free@example.com", hashed_password=hash_password(TEST_PASSWORD))
     db_session.add(user)
     db_session.commit()
     return user
@@ -89,7 +91,12 @@ def user(db_session) -> User:
 @pytest.fixture
 def other_user(db_session) -> User:
     """A second user, for checking that users cannot see each other's URLs."""
-    user = User(email="premium@example.com", is_premium=True, tier=Tier.PREMIUM)
+    user = User(
+        email="premium@example.com",
+        hashed_password=hash_password(TEST_PASSWORD),
+        is_premium=True,
+        tier=Tier.PREMIUM,
+    )
     db_session.add(user)
     db_session.commit()
     return user

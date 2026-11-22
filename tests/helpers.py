@@ -1,8 +1,10 @@
-"""Small helpers that keep the tests short and readable."""
+"""Small helpers and constants that keep the tests short and readable."""
 
 from fastapi.testclient import TestClient
 
 URLS_ENDPOINT = "/api/v1/urls/"
+REGISTER_ENDPOINT = "/api/v1/auth/register/"
+TEST_PASSWORD = "correct-password"
 
 
 def create_url(
