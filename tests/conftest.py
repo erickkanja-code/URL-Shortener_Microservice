@@ -81,7 +81,7 @@ def client(db_session):
 
 @pytest.fixture
 def user(db_session) -> User:
-    """A free-tier user who owns URLs in the tests."""
+    """A Free-tier user who owns URLs in the tests."""
     user = User(email="free@example.com", hashed_password=hash_password(TEST_PASSWORD))
     db_session.add(user)
     db_session.commit()
@@ -90,7 +90,11 @@ def user(db_session) -> User:
 
 @pytest.fixture
 def other_user(db_session) -> User:
-    """A second user, for checking that users cannot change each other's URLs."""
+    """A second user, on the Premium tier.
+
+    Used for ownership checks (a different user from `user`) and for
+    Premium-only features.
+    """
     user = User(
         email="premium@example.com",
         hashed_password=hash_password(TEST_PASSWORD),

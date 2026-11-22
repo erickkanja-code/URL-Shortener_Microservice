@@ -6,7 +6,8 @@ They know nothing about URL paths or request objects; the API layer calls
 them with plain values and the logged-in user.
 
 Permissions follow the IsOwnerOrReadOnly rule: any logged-in user may read
-a URL's details, but only its owner may change or deactivate it.
+a URL's details, but only its owner may change or deactivate it. Tier rules
+(the active URL limit and custom aliases) come from `app.services.tiers`.
 
 They raise `HTTPException` directly. This is a deliberate simplification:
 a stricter design would raise custom exceptions and let the API layer turn
@@ -23,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.managers.url import URLManager
 from app.models import URL, Click, Tag, User
 from app.schemas.url import URLCreate, URLUpdate
+from app.services.tiers import ensure_can_use_custom_alias, ensure_within_active_url_limit
 
 ALPHABET = string.ascii_letters + string.digits
 SHORT_CODE_LENGTH = 7
@@ -67,15 +69,16 @@ def get_url(db: Session, short_code: str) -> URL:
 def ensure_owner(url: URL, user: User) -> None:
     """Raise 403 unless the user owns the URL (the "IsOwner" part of IsOwnerOrReadOnly)."""
     if url.owner_id != user.id:
-        raise HTTPException(status_code=403, detail="You can only change URLs you own")
+        raise HTTPException(status_code=403, detail="You do not own this URL")
 
 
 def create_url(db: Session, payload: URLCreate, owner: User) -> URL:
     """Create and save a short URL owned by the given user.
 
     Raises 409 if this owner already shortened this URL or the alias is
-    taken, and 400 for unknown tags. A custom alias, when given, becomes
-    the short code.
+    taken, 400 for unknown tags, and 403 if a Free user asks for a custom
+    alias or would go over the active URL limit. A custom alias, when
+    given, becomes the short code.
     """
     original_url = str(payload.original_url)
     duplicate = db.scalar(
@@ -85,6 +88,7 @@ def create_url(db: Session, payload: URLCreate, owner: User) -> URL:
         raise HTTPException(status_code=409, detail="This URL has already been shortened")
 
     if payload.custom_alias:
+        ensure_can_use_custom_alias(owner)
         alias_taken = db.scalar(select(URL).where(URL.short_code == payload.custom_alias))
         if alias_taken:
             raise HTTPException(status_code=409, detail="This alias is already taken")
@@ -103,6 +107,8 @@ def create_url(db: Session, payload: URLCreate, owner: User) -> URL:
         tags=get_tags(db, payload.tags),
     )
     db.add(new_url)
+    db.flush()
+    ensure_within_active_url_limit(db, owner)
     db.commit()
     return new_url
 
@@ -131,8 +137,9 @@ def update_url(db: Session, short_code: str, payload: URLUpdate, user: User) -> 
     """Update only the fields the client sent, and return the updated URL.
 
     Raises 404 if the short code does not exist, 403 if the user does not
-    own the URL, and 400 for unknown tags. Sending `tags` replaces the
-    URL's tags.
+    own the URL or a Free user would go over the active URL limit (by
+    reactivating a URL or extending its expiry), and 400 for unknown tags.
+    Sending `tags` replaces the URL's tags.
     """
     url = get_url(db, short_code)
     ensure_owner(url, user)
@@ -145,6 +152,10 @@ def update_url(db: Session, short_code: str, payload: URLUpdate, user: User) -> 
 
     if payload.tags is not None:
         url.tags = get_tags(db, payload.tags)
+
+    if "is_active" in changes or "expires_at" in changes:
+        db.flush()
+        ensure_within_active_url_limit(db, user)
 
     db.commit()
     return url

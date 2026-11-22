@@ -62,19 +62,19 @@ def test_create_url_generates_a_valid_random_short_code(client, user_headers):
     assert all(character in ALPHABET for character in body["short_code"])
 
 
-def test_create_url_uses_custom_alias_as_short_code(client, user_headers):
-    body = create_url(client, user_headers, custom_alias="my-link")
+def test_create_url_uses_custom_alias_as_short_code(client, other_user_headers):
+    body = create_url(client, other_user_headers, custom_alias="my-link")
 
     assert body["short_code"] == "my-link"
     assert body["custom_alias"] == "my-link"
 
 
-def test_create_url_rejects_a_taken_alias(client, user_headers, other_user_headers):
-    create_url(client, user_headers, custom_alias="my-link")
+def test_create_url_rejects_a_taken_alias(client, other_user_headers):
+    create_url(client, other_user_headers, "https://first.com", custom_alias="my-link")
 
     response = client.post(
         URLS_ENDPOINT,
-        json={"original_url": "https://other.com", "custom_alias": "my-link"},
+        json={"original_url": "https://second.com", "custom_alias": "my-link"},
         headers=other_user_headers,
     )
 

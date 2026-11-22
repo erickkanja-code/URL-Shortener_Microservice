@@ -6,6 +6,7 @@ from app.core.security import create_access_token
 from app.models import User
 
 URLS_ENDPOINT = "/api/v1/urls/"
+ANALYTICS_ENDPOINT = "/api/v1/analytics/"
 REGISTER_ENDPOINT = "/api/v1/auth/register/"
 LOGIN_ENDPOINT = "/api/v1/auth/login/"
 REFRESH_ENDPOINT = "/api/v1/auth/refresh/"
@@ -20,6 +21,11 @@ def auth_headers(user: User) -> dict:
 def url_detail(short_code: str) -> str:
     """Return the path of one URL's endpoints, such as /api/v1/urls/abc/."""
     return f"{URLS_ENDPOINT}{short_code}/"
+
+
+def analytics_path(short_code: str) -> str:
+    """Return the path of a URL's analytics endpoint, such as /api/v1/analytics/abc/."""
+    return f"{ANALYTICS_ENDPOINT}{short_code}/"
 
 
 def create_url(
