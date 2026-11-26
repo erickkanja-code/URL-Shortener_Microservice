@@ -1,7 +1,7 @@
 """Tests for database-level rules: constraints and cascading deletes."""
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.exc import IntegrityError
 
 from app.models import URL, Click
@@ -36,3 +36,12 @@ def test_deleting_a_user_deletes_their_urls_and_clicks(db_session, user):
 
     assert db_session.scalars(select(URL)).all() == []
     assert db_session.scalars(select(Click)).all() == []
+
+
+def test_foreign_keys_used_in_lookups_are_indexed(engine):
+    inspector = inspect(engine)
+    url_indexes = {tuple(index["column_names"]) for index in inspector.get_indexes("urls")}
+    click_indexes = {tuple(index["column_names"]) for index in inspector.get_indexes("clicks")}
+
+    assert ("owner_id",) in url_indexes
+    assert ("url_id",) in click_indexes

@@ -36,7 +36,9 @@ class URL(Base):
     original_url: Mapped[str] = mapped_column(String(2048))
     short_code: Mapped[str] = mapped_column(String(10), unique=True, index=True)
     custom_alias: Mapped[str | None] = mapped_column(String(50), unique=True)
-    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    owner_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
     is_active: Mapped[bool] = mapped_column(default=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     title: Mapped[str | None] = mapped_column(String(255))
