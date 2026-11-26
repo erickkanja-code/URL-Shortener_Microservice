@@ -1,0 +1,106 @@
+# Continuous integration: on every push and pull request to master, check that
+# the code is clean, the migrations match the models, the tests pass, and the
+# Docker image builds and starts.
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch: # allows running the workflow by hand from the Actions tab
+
+# If a new commit is pushed while CI is still running for the same branch,
+# cancel the old run: only the newest commit's result matters.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Run Ruff
+        run: uv run ruff check app tests
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+
+    # A real PostgreSQL server, started next to the job before the steps run.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: shortener
+          POSTGRES_PASSWORD: ci-password
+          POSTGRES_DB: url_shortener
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U shortener"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    # Environment variables for every step in this job. These replace the .env
+    # file, which is never committed. The values only exist inside this job.
+    env:
+      DATABASE_URL: postgresql+psycopg://shortener:ci-password@localhost:5432/url_shortener
+      TEST_DATABASE_URL: postgresql+psycopg://shortener:ci-password@localhost:5432/url_shortener_test
+      JWT_SECRET_KEY: ci-only-key-used-for-tests
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Create the test database
+        run: psql "postgresql://shortener:ci-password@localhost:5432/url_shortener" -c "CREATE DATABASE url_shortener_test"
+
+      - name: Apply migrations
+        run: uv run alembic upgrade head
+
+      - name: Check migrations match the models
+        run: uv run alembic check
+
+      - name: Run tests
+        run: uv run pytest
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t url-shortener:ci .
+
+      - name: Check the app can start inside the image
+        run: >-
+          docker run --rm
+          -e DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/unused
+          -e JWT_SECRET_KEY=ci-only-key
+          url-shortener:ci
+          python -c "import app.main; print('App imported successfully')"
