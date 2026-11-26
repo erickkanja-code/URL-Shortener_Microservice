@@ -18,7 +18,8 @@ import secrets
 import string
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import exists, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.geolocation import lookup_location
@@ -29,15 +30,33 @@ from app.services.tiers import ensure_can_use_custom_alias, ensure_within_active
 
 ALPHABET = string.ascii_letters + string.digits
 SHORT_CODE_LENGTH = 7
+MAX_SHORT_CODE_ATTEMPTS = 10
+
+
+def random_short_code() -> str:
+    """Return a random 7-character code from ALPHABET, without checking whether it is taken."""
+    return "".join(secrets.choice(ALPHABET) for _ in range(SHORT_CODE_LENGTH))
+
+
+def short_code_taken(db: Session, short_code: str) -> bool:
+    """Return True if any URL already uses this short code (random or custom alias)."""
+    return db.scalar(select(exists().where(URL.short_code == short_code)))
 
 
 def generate_short_code(db: Session) -> str:
-    """Return a random 7-character code that no URL is using yet."""
-    while True:
-        short_code = "".join(secrets.choice(ALPHABET) for _ in range(SHORT_CODE_LENGTH))
-        existing_url = db.scalar(select(URL).where(URL.short_code == short_code))
-        if existing_url is None:
+    """Return a random short code that no URL is using yet.
+
+    Tries up to MAX_SHORT_CODE_ATTEMPTS codes. With 62^7 (about 3.5 trillion)
+    possible codes a collision is very rare, but the limit guarantees the
+    loop always ends. Raises 503 if every attempt was taken.
+    """
+    for _ in range(MAX_SHORT_CODE_ATTEMPTS):
+        short_code = random_short_code()
+        if not short_code_taken(db, short_code):
             return short_code
+    raise HTTPException(
+        status_code=503, detail="Could not generate a unique short code. Please try again."
+    )
 
 
 def get_tags(db: Session, names: list[str]) -> list[Tag]:
@@ -80,6 +99,11 @@ def create_url(db: Session, payload: URLCreate, owner: User) -> URL:
     taken, 400 for unknown tags, and 403 if a Free user asks for a custom
     alias or would go over the active URL limit. A custom alias, when
     given, becomes the short code.
+
+    Duplicate short codes are prevented twice: the code is checked before
+    saving, and if another request takes the same code in the moment
+    between that check and the insert, the database's unique constraint
+    rejects the insert and the client gets a 409 instead of a server error.
     """
     original_url = str(payload.original_url)
     duplicate = db.scalar(
@@ -90,8 +114,7 @@ def create_url(db: Session, payload: URLCreate, owner: User) -> URL:
 
     if payload.custom_alias:
         ensure_can_use_custom_alias(owner)
-        alias_taken = db.scalar(select(URL).where(URL.short_code == payload.custom_alias))
-        if alias_taken:
+        if short_code_taken(db, payload.custom_alias):
             raise HTTPException(status_code=409, detail="This alias is already taken")
         short_code = payload.custom_alias
     else:
@@ -108,7 +131,13 @@ def create_url(db: Session, payload: URLCreate, owner: User) -> URL:
         tags=get_tags(db, payload.tags),
     )
     db.add(new_url)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409, detail="This short code was just taken. Please try again."
+        )
     ensure_within_active_url_limit(db, owner)
     db.commit()
     return new_url
