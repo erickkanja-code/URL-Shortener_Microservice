@@ -2,7 +2,9 @@
 
 from sqlalchemy import select
 
+from app.core.geolocation import Location
 from app.models import Click
+from app.services import url as url_service
 from tests.helpers import create_url, url_detail
 
 
@@ -32,6 +34,30 @@ def test_redirect_records_a_click(client, db_session, user_headers):
     assert click.referrer == "https://google.com"
     assert click.user_agent == "TestBrowser"
     assert str(click.ip_address) == "0.0.0.0"  # the test client has no real IP address
+
+
+def test_redirect_records_the_visitors_location(client, db_session, user_headers, monkeypatch):
+    monkeypatch.setattr(
+        url_service, "lookup_location", lambda ip: Location(city="Kigali", country="Rwanda")
+    )
+    created = create_url(client, user_headers)
+
+    visit(client, created["short_code"])
+
+    click = db_session.scalars(select(Click)).one()
+    assert click.city == "Kigali"
+    assert click.country == "Rwanda"
+
+
+def test_redirect_still_works_when_the_location_is_unknown(client, db_session, user_headers):
+    created = create_url(client, user_headers, "https://example.com/page")
+
+    response = visit(client, created["short_code"])  # the test client's IP has no location
+
+    assert response.status_code == 302
+    click = db_session.scalars(select(Click)).one()
+    assert click.city is None
+    assert click.country is None
 
 
 def test_each_visit_increments_click_count(client, user_headers):

@@ -21,6 +21,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
+from app.core.geolocation import lookup_location
 from app.managers.url import URLManager
 from app.models import URL, Click, Tag, User
 from app.schemas.url import URLCreate, URLUpdate
@@ -191,12 +192,16 @@ def resolve_short_code(
     """Record a visit to a short code and return the URL to redirect to.
 
     Only active, non-expired URLs resolve; anything else raises 404. The
-    click is saved and `click_count` is incremented in the same transaction.
-    The increment runs in SQL, so simultaneous clicks are never lost.
+    visitor's city and country are looked up from their IP address; if that
+    fails, they are stored as unknown. The click is saved and `click_count`
+    is incremented in the same transaction. The increment runs in SQL, so
+    simultaneous clicks are never lost.
     """
     url = db.scalar(URLManager.active_urls().where(URL.short_code == short_code))
     if url is None:
         raise HTTPException(status_code=404, detail="URL not found")
+
+    location = lookup_location(ip_address)
 
     db.add(
         Click(
@@ -204,6 +209,8 @@ def resolve_short_code(
             ip_address=ip_address,
             user_agent=user_agent,
             referrer=referrer,
+            city=location.city,
+            country=location.country,
         )
     )
     db.execute(update(URL).where(URL.id == url.id).values(click_count=URL.click_count + 1))

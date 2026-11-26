@@ -65,4 +65,10 @@ def refresh_access_token(db: Session, refresh_token: str) -> AccessToken:
     user_id = decode_token(refresh_token, expected_type=REFRESH_TOKEN_TYPE)
 
     if user_id is None or db.get(User, user_id) is None:
-        raise
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return AccessToken(access_token=create_access_token(user_id))

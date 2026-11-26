@@ -45,7 +45,7 @@ def get_url(short_code: str, db: SessionDep, current_user: CurrentUserDep):
 
 
 @router.put("/{short_code}/", response_model=URLResponse)
-def update_url(short_code: str, payload: URLUpdate, db: SessionDep, current_user: CurrentUserDep):
+def update_url.,(short_code: str, payload: URLUpdate, db: SessionDep, current_user: CurrentUserDep):
     """Update the fields sent in the request body. Only the owner may do this."""
     return url_service.update_url(db, short_code, payload, current_user)
 
